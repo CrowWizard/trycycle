@@ -17,6 +17,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROMPT_BUILDER = SCRIPT_DIR / "prompt_builder" / "build.py"
 TRANSCRIPT_BUILDER = SCRIPT_DIR / "user-request-transcript" / "build.py"
 SUBAGENT_RUNNER = SCRIPT_DIR / "subagent_runner.py"
+KILO_TRANSCRIPT_FILE_ENV_PREFIX = "TRYCYCLE_TRANSCRIPT_FILE_"
+KILO_SINGLE_TRANSCRIPT_FILE_ENV = "TRYCYCLE_TRANSCRIPT_FILE"
 
 
 class PhaseError(RuntimeError):
@@ -56,7 +58,47 @@ def _resolve_existing_path(raw_path: str) -> Path:
     return path
 
 
-def _detect_transcript_cli(selected: str) -> str:
+def _missing_transcript_cli_message(unresolved_placeholders: list[str]) -> str:
+    joined = ", ".join(unresolved_placeholders)
+    return (
+        "Could not detect transcript CLI. Pass --transcript-cli explicitly, "
+        f"or bind these placeholders with --transcript-file NAME=PATH: {joined}."
+    )
+
+
+def _missing_kilo_transcript_file_message(unresolved_placeholders: list[str]) -> str:
+    suggestions = [f"{KILO_TRANSCRIPT_FILE_ENV_PREFIX}{name}" for name in unresolved_placeholders]
+    if len(unresolved_placeholders) == 1:
+        suggestions.append(KILO_SINGLE_TRANSCRIPT_FILE_ENV)
+    joined = ", ".join(suggestions)
+    return (
+        "Kilo transcript auto-detection requires transcript file environment bindings. "
+        f"Set one of: {joined}; or pass --transcript-file NAME=PATH explicitly."
+    )
+
+
+def _resolve_kilo_transcript_env_path(placeholder: str) -> str | None:
+    value = os.environ.get(f"{KILO_TRANSCRIPT_FILE_ENV_PREFIX}{placeholder}")
+    if value is not None and value.strip():
+        return value.strip()
+    return None
+
+
+def _resolve_kilo_transcript_paths(unresolved_placeholders: list[str]) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for placeholder in unresolved_placeholders:
+        raw_path = _resolve_kilo_transcript_env_path(placeholder)
+        if raw_path is None and len(unresolved_placeholders) == 1:
+            single_raw_path = os.environ.get(KILO_SINGLE_TRANSCRIPT_FILE_ENV)
+            if single_raw_path is not None and single_raw_path.strip():
+                raw_path = single_raw_path.strip()
+        if raw_path is None:
+            continue
+        resolved[placeholder] = str(_resolve_existing_path(raw_path))
+    return resolved
+
+
+def _detect_transcript_cli(selected: str, unresolved_placeholders: list[str]) -> str:
     if selected != "auto":
         return selected
     if os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_HOME"):
@@ -65,7 +107,9 @@ def _detect_transcript_cli(selected: str) -> str:
         return "claude-code"
     if os.environ.get("OPENCODE"):
         return "opencode"
-    raise PhaseError("Could not detect transcript CLI. Pass --transcript-cli explicitly.")
+    if os.environ.get("KILO"):
+        return "kilo"
+    raise PhaseError(_missing_transcript_cli_message(unresolved_placeholders))
 
 
 def _run_command(
@@ -109,7 +153,15 @@ def _prepare_transcripts(
     if not unresolved_placeholders:
         return None, rendered_paths
 
-    cli_name = _detect_transcript_cli(args.transcript_cli)
+    cli_name = _detect_transcript_cli(args.transcript_cli, unresolved_placeholders)
+    if cli_name == "kilo":
+        kilo_paths = _resolve_kilo_transcript_paths(unresolved_placeholders)
+        rendered_paths.update(kilo_paths)
+        still_unresolved = [name for name in unresolved_placeholders if name not in kilo_paths]
+        if still_unresolved:
+            raise PhaseError(_missing_kilo_transcript_file_message(still_unresolved))
+        return cli_name, rendered_paths
+
     if cli_name == "claude-code" and not args.canary:
         raise PhaseError(
             "Claude transcript lookup requires --canary from a prior top-level canary command."
@@ -317,7 +369,7 @@ def _add_prepare_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--transcript-cli",
-        choices=["auto", "codex-cli", "claude-code", "kimi-cli", "opencode"],
+        choices=["auto", "kilo", "codex-cli", "claude-code", "kimi-cli", "opencode"],
         default="auto",
         help="Transcript provider to use for transcript placeholders.",
     )

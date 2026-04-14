@@ -417,6 +417,90 @@ class RunPhaseTests(unittest.TestCase):
             prompt_text = Path(payload["prompt_path"]).read_text(encoding="utf-8")
             self.assertIn("kilo transcript input", prompt_text)
 
+    def test_prepare_auto_detects_kilo_and_uses_placeholder_specific_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            template_path = tmp_path / "template.md"
+            transcript_path = tmp_path / "kilo-transcript.json"
+            template_path.write_text(
+                "<task_input_json>{USER_REQUEST_TRANSCRIPT}</task_input_json>\n",
+                encoding="utf-8",
+            )
+            transcript_path.write_text(
+                '[{"role": "user", "text": "kilo auto transcript"}]\n',
+                encoding="utf-8",
+            )
+
+            result = self.run_phase(
+                "prepare",
+                "--phase",
+                "planning-initial",
+                "--template",
+                str(template_path),
+                "--workdir",
+                str(workdir),
+                "--transcript-placeholder",
+                "USER_REQUEST_TRANSCRIPT",
+                "--require-nonempty-tag",
+                "task_input_json",
+                env={
+                    "KILO": "1",
+                    "TRYCYCLE_TRANSCRIPT_FILE_USER_REQUEST_TRANSCRIPT": str(transcript_path),
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["transcript_cli"], "kilo")
+            self.assertEqual(
+                payload["transcript_paths"]["USER_REQUEST_TRANSCRIPT"],
+                str(transcript_path),
+            )
+            prompt_text = Path(payload["prompt_path"]).read_text(encoding="utf-8")
+            self.assertIn("kilo auto transcript", prompt_text)
+
+    def test_prepare_auto_detects_kilo_and_uses_single_env_file_for_single_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            template_path = tmp_path / "template.md"
+            transcript_path = tmp_path / "kilo-transcript.json"
+            template_path.write_text(
+                "<task_input_json>{USER_REQUEST_TRANSCRIPT}</task_input_json>\n",
+                encoding="utf-8",
+            )
+            transcript_path.write_text(
+                '[{"role": "user", "text": "kilo single env transcript"}]\n',
+                encoding="utf-8",
+            )
+
+            result = self.run_phase(
+                "prepare",
+                "--phase",
+                "planning-initial",
+                "--template",
+                str(template_path),
+                "--workdir",
+                str(workdir),
+                "--transcript-placeholder",
+                "USER_REQUEST_TRANSCRIPT",
+                "--require-nonempty-tag",
+                "task_input_json",
+                env={
+                    "KILO": "1",
+                    "TRYCYCLE_TRANSCRIPT_FILE": str(transcript_path),
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["transcript_cli"], "kilo")
+            prompt_text = Path(payload["prompt_path"]).read_text(encoding="utf-8")
+            self.assertIn("kilo single env transcript", prompt_text)
+
     def test_prepare_resolves_relative_transcript_search_root_from_caller_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -793,6 +877,68 @@ class RunPhaseTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 1)
             self.assertIn("canary is required", result.stderr)
+
+    def test_prepare_suggests_transcript_file_when_auto_detection_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            template_path = tmp_path / "template.md"
+            template_path.write_text(
+                "<task_input_json>{USER_REQUEST_TRANSCRIPT}</task_input_json>\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_phase(
+                "prepare",
+                "--phase",
+                "planning-initial",
+                "--template",
+                str(template_path),
+                "--workdir",
+                str(workdir),
+                "--transcript-placeholder",
+                "USER_REQUEST_TRANSCRIPT",
+                env={
+                    "CODEX_THREAD_ID": "",
+                    "CODEX_HOME": "",
+                    "CLAUDECODE": "",
+                    "OPENCODE": "",
+                    "KILO": "",
+                },
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("--transcript-file NAME=PATH", result.stderr)
+            self.assertIn("USER_REQUEST_TRANSCRIPT", result.stderr)
+
+    def test_prepare_reports_kilo_env_binding_requirement_when_kilo_auto_has_no_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            template_path = tmp_path / "template.md"
+            template_path.write_text(
+                "<task_input_json>{USER_REQUEST_TRANSCRIPT}</task_input_json>\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_phase(
+                "prepare",
+                "--phase",
+                "planning-initial",
+                "--template",
+                str(template_path),
+                "--workdir",
+                str(workdir),
+                "--transcript-placeholder",
+                "USER_REQUEST_TRANSCRIPT",
+                env={"KILO": "1"},
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("TRYCYCLE_TRANSCRIPT_FILE_USER_REQUEST_TRANSCRIPT", result.stderr)
+            self.assertIn("TRYCYCLE_TRANSCRIPT_FILE", result.stderr)
 
     def test_prepare_auto_detects_opencode_transcript_cli_when_opencode_env_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

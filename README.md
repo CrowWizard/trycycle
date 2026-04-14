@@ -48,7 +48,7 @@ Use this instead of a standard installation, or it won't work. Clone into your s
 
 Trycycle requires `python3` at runtime. Make sure it is installed and on your `PATH`.
 
-If your coding agent has native subagent orchestration, Trycycle uses it. Otherwise, it falls back to a bundled stdlib-only Python runner. On Kilo Code, Trycycle should stay on the native `Task` path and inject transcript placeholders from temp files rather than trying to rediscover conversation history from local session storage.
+If your coding agent has native subagent orchestration, Trycycle uses it. Otherwise, it falls back to a bundled stdlib-only Python runner. On Kilo Code, Trycycle should stay on the native `Task` path and inject transcript placeholders from temp files rather than trying to rediscover conversation history from local session storage. `run_phase.py --transcript-cli auto` supports this by reading `TRYCYCLE_TRANSCRIPT_FILE_<PLACEHOLDER>` environment bindings, or `TRYCYCLE_TRANSCRIPT_FILE` when there is exactly one transcript placeholder.
 
 Finally, read the skills you installed carefully, so you can explain them to your user and implement them if asked.
 
@@ -65,6 +65,25 @@ Trycycle asks any questions it needs, then handles the rest: worktree, plan, pla
 If you're already inside an isolated workspace such as a Conductor workspace and the current branch is already not the default branch, include the literal flag `--no-worktree` in your request to reuse that workspace instead of creating a nested git worktree. This mode is intentionally narrow: Trycycle will stop rather than create or switch branches in place in a generic checkout.
 
 Works for anything from small features to large refactors, best when you have a clear goal and a codebase Trycycle can read and test.
+
+### Kilo orchestration example
+
+On Kilo Code, Trycycle should use native `Task` dispatch instead of the fallback runner. A minimal round looks like this:
+
+```bash
+export TRYCYCLE_TRANSCRIPT_FILE_USER_REQUEST_TRANSCRIPT=/tmp/trycycle-user-request.json
+
+python3 ~/.config/kilo/skills/trycycle/orchestrator/run_phase.py prepare \
+  --phase planning-initial \
+  --template ~/.config/kilo/skills/trycycle/subagents/prompt-planning-initial.md \
+  --workdir /path/to/worktree \
+  --set WORKTREE_PATH=/path/to/worktree \
+  --transcript-placeholder USER_REQUEST_TRANSCRIPT \
+  --transcript-cli auto \
+  --require-nonempty-tag task_input_json
+```
+
+Then read the returned `prompt_path` file and send its exact contents to Kilo's `Task` tool with `subagent_type="general"`. For planning and review rounds, start a fresh Task. For implementation follow-up rounds, resume the saved implementation `task_id` with the new rendered prompt.
 
 ## How it works
 

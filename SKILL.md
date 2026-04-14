@@ -43,7 +43,7 @@ When a step below tells you to prepare or dispatch a phase:
 - If fallback dispatch returns `dispatch.status: "escalate_to_user"`, stop and surface the nested `dispatch.message` plus artifact paths.
 - Pass short scalar placeholder values such as `{WORKTREE_PATH}`, `{IMPLEMENTATION_PLAN_PATH}`, and `{TEST_PLAN_PATH}` with `--set NAME=VALUE`.
 - Pass multiline values such as reviewer outputs with `--set-file NAME=PATH`.
-- When you already have transcript text in hand, bind transcript placeholders directly with `--transcript-file NAME=PATH` instead of forcing transcript lookup.
+- When you already have transcript text in hand, bind transcript placeholders directly with `--transcript-file NAME=PATH` instead of forcing transcript lookup. On Kilo, `--transcript-cli auto` can also consume transcript files from environment bindings.
 - When a multiline placeholder comes from command or subagent stdout, save it to a temp file immediately before wrapper invocation so you can bind it with `--set-file`.
 - Bind transcript placeholders such as `{USER_REQUEST_TRANSCRIPT}`, `{INITIAL_REQUEST_AND_SUBSEQUENT_CONVERSATION}`, and `{FULL_CONVERSATION_VERBATIM}` with `--transcript-placeholder NAME`.
 - Use `--require-nonempty-tag TAG` when a prompt requires a tagged block to contain real content after trimming whitespace.
@@ -51,6 +51,53 @@ When a step below tells you to prepare or dispatch a phase:
 - If your environment has no native subagent support and the wrapper's fallback run does not function, escalate to the user.
 
 The prompt builder still supports conditional blocks inside templates. A block guarded by `{{#if NAME}} ... {{/if}}` is included only when `NAME` is bound to a non-empty value.
+
+### Kilo Task pattern
+
+When you are hosting Trycycle inside Kilo Code, follow this exact shape for every native dispatch round:
+
+1. Save the required transcript JSON to a temp UTF-8 file immediately before `run_phase.py prepare`.
+2. Build the phase prompt with either `--transcript-file NAME=PATH` or `--transcript-cli auto` plus `TRYCYCLE_TRANSCRIPT_FILE_<PLACEHOLDER>`.
+3. Read the returned `prompt_path` and send that file's exact contents to `Task` with `subagent_type="general"`.
+4. Treat the Task result as the round's authoritative subagent reply.
+5. For planning and review rounds, start a fresh Task each time.
+6. For implementation-fix rounds, resume the same implementation `task_id` only when you truly need the same subagent to continue.
+
+Example planning round in Kilo:
+
+```bash
+export TRYCYCLE_TRANSCRIPT_FILE_USER_REQUEST_TRANSCRIPT=/tmp/trycycle-user-request.json
+
+python3 <skill-directory>/orchestrator/run_phase.py prepare \
+  --phase planning-initial \
+  --template <skill-directory>/subagents/prompt-planning-initial.md \
+  --workdir {WORKTREE_PATH} \
+  --set WORKTREE_PATH={WORKTREE_PATH} \
+  --transcript-placeholder USER_REQUEST_TRANSCRIPT \
+  --transcript-cli auto \
+  --require-nonempty-tag task_input_json
+```
+
+Then read the returned `prompt_path` and dispatch:
+
+```text
+Task(
+  description="Trycycle planning round",
+  subagent_type="general",
+  prompt=<exact contents of prompt_path>
+)
+```
+
+Example implementation continuation in Kilo:
+
+```text
+Task(
+  task_id=<saved implementation task_id>,
+  description="Trycycle execution fix round",
+  subagent_type="general",
+  prompt=<exact contents of prompt_path>
+)
+```
 
 ## Workspace path convention
 
@@ -63,7 +110,7 @@ In `--no-worktree` mode, do not create a nested git worktree and do not create o
 ## Transcript placeholder helper
 
 When a phase wrapper call needs `{USER_REQUEST_TRANSCRIPT}`, `{INITIAL_REQUEST_AND_SUBSEQUENT_CONVERSATION}`, or `{FULL_CONVERSATION_VERBATIM}`:
-1. For Kilo Code, write the current conversation or transcript JSON to a temp UTF-8 file immediately before the wrapper call, then pass both `--transcript-placeholder NAME` and `--transcript-file NAME=PATH`. Do not use transcript auto-detection or transcript database lookup on Kilo.
+1. For Kilo Code, write the current conversation or transcript JSON to a temp UTF-8 file immediately before the wrapper call. Either pass both `--transcript-placeholder NAME` and `--transcript-file NAME=PATH`, or keep `--transcript-cli auto` and export `TRYCYCLE_TRANSCRIPT_FILE_<PLACEHOLDER>=/absolute/path/to/file` first. When there is exactly one transcript placeholder, `TRYCYCLE_TRANSCRIPT_FILE` is also accepted as a shorthand. Do not use transcript database lookup on Kilo.
 2. For Codex CLI, let the wrapper use direct session lookup by default.
 3. For Kimi CLI, always pass `--transcript-cli kimi-cli` on transcript-bearing wrapper calls and let direct session lookup run first.
 4. If the wrapper reports that a canary is required, run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command, capture stdout exactly as `{CANARY}`, then rerun the wrapper with `--canary "{CANARY}"`. For Kimi-hosted runs, keep `--transcript-cli kimi-cli` on the rerun as well.
