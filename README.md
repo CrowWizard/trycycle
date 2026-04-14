@@ -1,6 +1,6 @@
 <!-- GitHub repo settings (set manually in Settings > General):
   Description: A skill that plans, strengthens, and reviews your code -- automatically.
-  Topics: claude-code, codex-cli, kimi-cli, opencode, ai-coding, code-review, autonomous-agents, ai-skill, hill-climbing
+  Topics: claude-code, codex-cli, kimi-cli, opencode, kilocode, ai-coding, code-review, autonomous-agents, ai-skill, hill-climbing
   Social preview: upload assets/social-preview.png
 -->
 
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <em>A skill for Claude Code, Codex CLI, Kimi CLI, and OpenCode that plans, strengthens, and reviews your code -- automatically.</em>
+  <em>A skill for Claude Code, Codex CLI, Kimi CLI, OpenCode, and Kilo Code that plans, strengthens, and reviews your code -- automatically.</em>
 </p>
 
 <p align="center">
@@ -19,6 +19,7 @@
   <a href="https://github.com/anthropics/claude-code"><img src="https://img.shields.io/badge/built%20for-Claude%20Code-6B4FBB?logo=anthropic&logoColor=white" alt="Built for Claude Code" /></a>
   <a href="https://github.com/openai/codex"><img src="https://img.shields.io/badge/works%20with-Codex%20CLI-412991?logo=openai&logoColor=white" alt="Works with Codex CLI" /></a>
   <a href="https://github.com/anomalyco/opencode"><img src="https://img.shields.io/badge/works%20with-OpenCode-FF6B35" alt="Works with OpenCode" /></a>
+  <a href="https://kilo.ai"><img src="https://img.shields.io/badge/works%20with-Kilo%20Code-111827" alt="Works with Kilo Code" /></a>
 </p>
 
 ---
@@ -27,7 +28,7 @@
 
 ### If you are human
 
-Tell your favorite coding agent (Claude Code, Codex CLI, Kimi CLI, OpenCode, etc.):
+Tell your favorite coding agent (Claude Code, Codex CLI, Kimi CLI, OpenCode, Kilo Code, etc.):
 
 ```
 Read https://raw.githubusercontent.com/danshapiro/trycycle/main/README.md. Follow the installation instructions there.
@@ -41,12 +42,13 @@ Use this instead of a standard installation, or it won't work. Clone into your s
 - **Codex CLI:** `git clone https://github.com/danshapiro/trycycle.git ~/.codex/skills/trycycle`
 - **Kimi CLI:** `git clone https://github.com/danshapiro/trycycle.git ~/.kimi/skills/trycycle`
 - **OpenCode:** `git clone https://github.com/danshapiro/trycycle.git ~/.config/opencode/skills/trycycle`
+- **Kilo Code:** `git clone https://github.com/danshapiro/trycycle.git ~/.config/kilo/skills/trycycle`
 
 > **Note:** OpenCode also discovers skills installed at `~/.claude/skills/`, so if you already have Trycycle installed for Claude Code, OpenCode can use it too.
 
 Trycycle requires `python3` at runtime. Make sure it is installed and on your `PATH`.
 
-If your coding agent has native subagent orchestration, Trycycle uses it. Otherwise, it falls back to a bundled stdlib-only Python runner.
+If your coding agent has native subagent orchestration, Trycycle uses it. Otherwise, it falls back to a bundled stdlib-only Python runner. On Kilo Code, Trycycle should stay on the native `Task` path and inject transcript placeholders from temp files rather than trying to rediscover conversation history from local session storage.
 
 Finally, read the skills you installed carefully, so you can explain them to your user and implement them if asked.
 

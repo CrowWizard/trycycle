@@ -375,6 +375,48 @@ class RunPhaseTests(unittest.TestCase):
             self.assertIn("hello from kimi phase", prompt_text)
             self.assertIn("visible kimi phase reply", prompt_text)
 
+    def test_prepare_supports_explicit_transcript_files_without_cli_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            template_path = tmp_path / "template.md"
+            transcript_path = tmp_path / "transcript.json"
+            template_path.write_text(
+                "<task_input_json>{USER_REQUEST_TRANSCRIPT}</task_input_json>\n",
+                encoding="utf-8",
+            )
+            transcript_path.write_text(
+                '[{"role": "user", "text": "kilo transcript input"}]\n',
+                encoding="utf-8",
+            )
+
+            result = self.run_phase(
+                "prepare",
+                "--phase",
+                "planning-initial",
+                "--template",
+                str(template_path),
+                "--workdir",
+                str(workdir),
+                "--transcript-placeholder",
+                "USER_REQUEST_TRANSCRIPT",
+                "--transcript-file",
+                f"USER_REQUEST_TRANSCRIPT={transcript_path}",
+                "--require-nonempty-tag",
+                "task_input_json",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertIsNone(payload["transcript_cli"])
+            self.assertEqual(
+                payload["transcript_paths"]["USER_REQUEST_TRANSCRIPT"],
+                str(transcript_path),
+            )
+            prompt_text = Path(payload["prompt_path"]).read_text(encoding="utf-8")
+            self.assertIn("kilo transcript input", prompt_text)
+
     def test_prepare_resolves_relative_transcript_search_root_from_caller_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

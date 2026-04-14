@@ -27,11 +27,13 @@ These will cause your context to bloat so you can't do your job, or kill agents 
 
 Several steps below reference prompt template files in `<skill-directory>/subagents/`. Do not reconstruct those prompts yourself. Prepare phase prompts with `python3 <skill-directory>/orchestrator/run_phase.py`.
 
-Choose native mode (e.g. Claude Code `Agent`, Codex `spawn_agent`, Kimi `Agent`, OpenCode `task`) when your environment provides a native subagent tool. Choose the fallback-runner mode only if you have NO such tool available.
+Choose native mode (e.g. Claude Code `Agent`, Codex `spawn_agent`, Kimi `Agent`, OpenCode `task`, Kilo Code `Task`) when your environment provides a native subagent tool. Choose the fallback-runner mode only if you have NO such tool available.
 
 When a step below tells you to prepare or dispatch a phase:
 
 - In native mode, use `python3 <skill-directory>/orchestrator/run_phase.py prepare ...`, then send the exact contents of the returned `prompt_path` verbatim to the target subagent.
+- In Kilo native mode, dispatch subagents with the `Task` tool. Use `subagent_type="general"` for implementation-style work and resume the same `task_id` only when you truly need to continue the same implementation round.
+- In Kilo native mode, do not busy-poll or invent monitoring loops. Dispatch the `Task`, wait for its reply, and treat that reply as the authoritative subagent output for the round.
 - In fallback-runner mode, use `python3 <skill-directory>/orchestrator/run_phase.py run ...`. It prepares transcript and prompt artifacts, then dispatches through the bundled runner.
 - In fallback-runner mode, pass `--backend host` on wrapper calls so fresh subagents stay on the same backend as the parent agent.
 - When the host agent is Kimi and you are using fallback-runner mode, pass `--backend kimi` instead because `host` and `auto` cannot reliably detect a Kimi host.
@@ -41,6 +43,7 @@ When a step below tells you to prepare or dispatch a phase:
 - If fallback dispatch returns `dispatch.status: "escalate_to_user"`, stop and surface the nested `dispatch.message` plus artifact paths.
 - Pass short scalar placeholder values such as `{WORKTREE_PATH}`, `{IMPLEMENTATION_PLAN_PATH}`, and `{TEST_PLAN_PATH}` with `--set NAME=VALUE`.
 - Pass multiline values such as reviewer outputs with `--set-file NAME=PATH`.
+- When you already have transcript text in hand, bind transcript placeholders directly with `--transcript-file NAME=PATH` instead of forcing transcript lookup.
 - When a multiline placeholder comes from command or subagent stdout, save it to a temp file immediately before wrapper invocation so you can bind it with `--set-file`.
 - Bind transcript placeholders such as `{USER_REQUEST_TRANSCRIPT}`, `{INITIAL_REQUEST_AND_SUBSEQUENT_CONVERSATION}`, and `{FULL_CONVERSATION_VERBATIM}` with `--transcript-placeholder NAME`.
 - Use `--require-nonempty-tag TAG` when a prompt requires a tagged block to contain real content after trimming whitespace.
@@ -60,14 +63,15 @@ In `--no-worktree` mode, do not create a nested git worktree and do not create o
 ## Transcript placeholder helper
 
 When a phase wrapper call needs `{USER_REQUEST_TRANSCRIPT}`, `{INITIAL_REQUEST_AND_SUBSEQUENT_CONVERSATION}`, or `{FULL_CONVERSATION_VERBATIM}`:
-1. For Codex CLI, let the wrapper use direct session lookup by default.
-2. For Kimi CLI, always pass `--transcript-cli kimi-cli` on transcript-bearing wrapper calls and let direct session lookup run first.
-3. If the wrapper reports that a canary is required, run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command, capture stdout exactly as `{CANARY}`, then rerun the wrapper with `--canary "{CANARY}"`. For Kimi-hosted runs, keep `--transcript-cli kimi-cli` on the rerun as well.
-4. For Claude Code, always run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command first, capture stdout exactly as `{CANARY}`, then invoke the wrapper with `--transcript-cli claude-code --canary "{CANARY}"`.
-5. For OpenCode, always run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command first, capture stdout exactly as `{CANARY}`, then invoke the wrapper with `--transcript-cli opencode --canary "{CANARY}"`.
+1. For Kilo Code, write the current conversation or transcript JSON to a temp UTF-8 file immediately before the wrapper call, then pass both `--transcript-placeholder NAME` and `--transcript-file NAME=PATH`. Do not use transcript auto-detection or transcript database lookup on Kilo.
+2. For Codex CLI, let the wrapper use direct session lookup by default.
+3. For Kimi CLI, always pass `--transcript-cli kimi-cli` on transcript-bearing wrapper calls and let direct session lookup run first.
+4. If the wrapper reports that a canary is required, run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command, capture stdout exactly as `{CANARY}`, then rerun the wrapper with `--canary "{CANARY}"`. For Kimi-hosted runs, keep `--transcript-cli kimi-cli` on the rerun as well.
+5. For Claude Code, always run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command first, capture stdout exactly as `{CANARY}`, then invoke the wrapper with `--transcript-cli claude-code --canary "{CANARY}"`.
+6. For OpenCode, always run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command first, capture stdout exactly as `{CANARY}`, then invoke the wrapper with `--transcript-cli opencode --canary "{CANARY}"`.
 
 The canary must be emitted by a separate top-level command so it reaches the live session transcript before lookup. Do not rely on shell-specific capture or assignment forms that may keep the canary out of visible command output; shells and host wrappers vary, and if the canary is not visibly emitted into the session transcript, lookup will fail. Build transcript placeholder values immediately before each phase wrapper call that uses them.
-Kimi and OpenCode support is explicit here because `host` and `auto` cannot reliably detect a Kimi host, and OpenCode requires canary-based lookup.
+Kilo support is explicit here because Kilo should inject the live conversation directly instead of reverse-engineering it from local session storage. Kimi and OpenCode support are explicit here because `host` and `auto` cannot reliably detect a Kimi host, and OpenCode requires canary-based lookup.
 
 When a step below references `{POST_IMPLEMENTATION_REVIEW_OBSERVATIONS_JSON}`, use the extracted review observations JSON exactly as the placeholder value.
 

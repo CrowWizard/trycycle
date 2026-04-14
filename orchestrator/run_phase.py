@@ -45,6 +45,17 @@ def _parse_binding(raw: str) -> tuple[str, str]:
     return _parse_placeholder_name(name), value
 
 
+def _resolve_existing_path(raw_path: str) -> Path:
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    if not path.exists():
+        raise PhaseError(f"Transcript file not found: {path}")
+    if not path.is_file():
+        raise PhaseError(f"Transcript file is not a regular file: {path}")
+    return path
+
+
 def _detect_transcript_cli(selected: str) -> str:
     if selected != "auto":
         return selected
@@ -84,6 +95,20 @@ def _prepare_transcripts(
     if not placeholders:
         return None, {}
 
+    rendered_paths: dict[str, str] = {}
+    unresolved_placeholders: list[str] = []
+    transcript_file_bindings = dict(_parse_binding(raw) for raw in args.transcript_file)
+
+    for placeholder in placeholders:
+        transcript_file = transcript_file_bindings.get(placeholder)
+        if transcript_file is None:
+            unresolved_placeholders.append(placeholder)
+            continue
+        rendered_paths[placeholder] = str(_resolve_existing_path(transcript_file))
+
+    if not unresolved_placeholders:
+        return None, rendered_paths
+
     cli_name = _detect_transcript_cli(args.transcript_cli)
     if cli_name == "claude-code" and not args.canary:
         raise PhaseError(
@@ -92,9 +117,8 @@ def _prepare_transcripts(
 
     inputs_dir = artifacts_dir / "inputs"
     inputs_dir.mkdir(parents=True, exist_ok=True)
-    rendered_paths: dict[str, str] = {}
 
-    first_placeholder = placeholders[0]
+    first_placeholder = unresolved_placeholders[0]
     first_output_path = inputs_dir / f"{first_placeholder}.txt"
     transcript_search_root = None
     if args.transcript_search_root:
@@ -117,7 +141,7 @@ def _prepare_transcripts(
     _run_command(command, cwd=workdir)
     rendered_paths[first_placeholder] = str(first_output_path)
 
-    for placeholder in placeholders[1:]:
+    for placeholder in unresolved_placeholders[1:]:
         path = inputs_dir / f"{placeholder}.txt"
         shutil.copyfile(first_output_path, path)
         rendered_paths[placeholder] = str(path)
@@ -283,6 +307,13 @@ def _add_prepare_arguments(parser: argparse.ArgumentParser) -> None:
         default=[],
         metavar="NAME",
         help="Bind the current session transcript to this placeholder name.",
+    )
+    parser.add_argument(
+        "--transcript-file",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Bind a transcript placeholder from an existing UTF-8 file.",
     )
     parser.add_argument(
         "--transcript-cli",
