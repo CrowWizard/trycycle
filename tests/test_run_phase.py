@@ -178,6 +178,116 @@ def write_claude_transcript(root: Path, *, canary: str) -> None:
     )
 
 
+def _write_kilo_db(
+    db_path: Path,
+    *,
+    session_id: str,
+    directory: Path,
+    user_text: str,
+    assistant_reply: str,
+    time_updated: int = 2000,
+) -> None:
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE session (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            parent_id TEXT,
+            slug TEXT NOT NULL,
+            directory TEXT NOT NULL,
+            title TEXT NOT NULL,
+            version TEXT NOT NULL,
+            share_url TEXT,
+            summary_additions INTEGER,
+            summary_deletions INTEGER,
+            summary_files INTEGER,
+            summary_diffs TEXT,
+            revert TEXT,
+            permission TEXT,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            time_compacting INTEGER,
+            time_archived INTEGER,
+            workspace_id TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE message (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE part (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id,
+            "proj1",
+            None,
+            session_id,
+            str(directory.resolve()),
+            "test",
+            "7.2.5",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            1000,
+            time_updated,
+            None,
+            None,
+            None,
+        ),
+    )
+    conn.execute(
+        "INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+        ("msg_001", session_id, 1001, 1001, json.dumps({"role": "user"})),
+    )
+    conn.execute(
+        "INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            "prt_001",
+            "msg_001",
+            session_id,
+            1001,
+            1001,
+            json.dumps({"type": "text", "text": user_text}),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+        ("msg_002", session_id, 1002, 1002, json.dumps({"role": "assistant"})),
+    )
+    conn.execute(
+        "INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            "prt_002",
+            "msg_002",
+            session_id,
+            1002,
+            1002,
+            json.dumps({"type": "text", "text": assistant_reply}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
 class RunPhaseTests(unittest.TestCase):
     def run_runner(
         self,
@@ -500,6 +610,51 @@ class RunPhaseTests(unittest.TestCase):
             self.assertEqual(payload["transcript_cli"], "kilo")
             prompt_text = Path(payload["prompt_path"]).read_text(encoding="utf-8")
             self.assertIn("kilo single env transcript", prompt_text)
+
+    def test_prepare_auto_detects_kilo_and_uses_native_direct_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            template_path = tmp_path / "template.md"
+            search_root = tmp_path / "kilo-share"
+            search_root.mkdir()
+            db_path = search_root / "kilo.db"
+            template_path.write_text(
+                "<task_input_json>{USER_REQUEST_TRANSCRIPT}</task_input_json>\n",
+                encoding="utf-8",
+            )
+            _write_kilo_db(
+                db_path,
+                session_id="ses_kilo_direct",
+                directory=workdir,
+                user_text="kilo native transcript",
+                assistant_reply="kilo native reply",
+            )
+
+            result = self.run_phase(
+                "prepare",
+                "--phase",
+                "planning-initial",
+                "--template",
+                str(template_path),
+                "--workdir",
+                str(workdir),
+                "--transcript-placeholder",
+                "USER_REQUEST_TRANSCRIPT",
+                "--transcript-search-root",
+                str(search_root),
+                "--require-nonempty-tag",
+                "task_input_json",
+                env={"KILO": "1"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["transcript_cli"], "kilo")
+            prompt_text = Path(payload["prompt_path"]).read_text(encoding="utf-8")
+            self.assertIn("kilo native transcript", prompt_text)
+            self.assertIn("kilo native reply", prompt_text)
 
     def test_prepare_resolves_relative_transcript_search_root_from_caller_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -912,12 +1067,14 @@ class RunPhaseTests(unittest.TestCase):
             self.assertIn("--transcript-file NAME=PATH", result.stderr)
             self.assertIn("USER_REQUEST_TRANSCRIPT", result.stderr)
 
-    def test_prepare_reports_kilo_env_binding_requirement_when_kilo_auto_has_no_file(self) -> None:
+    def test_prepare_reports_kilo_lookup_failure_when_kilo_auto_has_no_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             workdir = tmp_path / "repo"
             workdir.mkdir()
             template_path = tmp_path / "template.md"
+            search_root = tmp_path / "kilo-share"
+            search_root.mkdir()
             template_path.write_text(
                 "<task_input_json>{USER_REQUEST_TRANSCRIPT}</task_input_json>\n",
                 encoding="utf-8",
@@ -933,12 +1090,13 @@ class RunPhaseTests(unittest.TestCase):
                 str(workdir),
                 "--transcript-placeholder",
                 "USER_REQUEST_TRANSCRIPT",
+                "--transcript-search-root",
+                str(search_root),
                 env={"KILO": "1"},
             )
 
             self.assertEqual(result.returncode, 1)
-            self.assertIn("TRYCYCLE_TRANSCRIPT_FILE_USER_REQUEST_TRANSCRIPT", result.stderr)
-            self.assertIn("TRYCYCLE_TRANSCRIPT_FILE", result.stderr)
+            self.assertIn("A canary is required", result.stderr)
 
     def test_prepare_auto_detects_opencode_transcript_cli_when_opencode_env_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

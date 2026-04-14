@@ -858,6 +858,252 @@ def _create_opencode_db(db_path: Path, sessions: list[dict]) -> None:
     conn.close()
 
 
+def _create_kilo_db(db_path: Path, sessions: list[dict]) -> None:
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE session (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            parent_id TEXT,
+            slug TEXT NOT NULL,
+            directory TEXT NOT NULL,
+            title TEXT NOT NULL,
+            version TEXT NOT NULL,
+            share_url TEXT,
+            summary_additions INTEGER,
+            summary_deletions INTEGER,
+            summary_files INTEGER,
+            summary_diffs TEXT,
+            revert TEXT,
+            permission TEXT,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            time_compacting INTEGER,
+            time_archived INTEGER,
+            workspace_id TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE message (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE part (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        )
+    """)
+    for session in sessions:
+        conn.execute(
+            "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                session["id"],
+                session.get("project_id", "proj1"),
+                None,
+                session.get("slug", session["id"]),
+                session.get("directory", "/tmp"),
+                session.get("title", "test"),
+                session.get("version", "7.2.5"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                session.get("time_created", 1000),
+                session.get("time_updated", 2000),
+                None,
+                session.get("time_archived"),
+                None,
+            ),
+        )
+        for msg in session.get("messages", []):
+            conn.execute(
+                "INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+                (
+                    msg["id"],
+                    session["id"],
+                    msg.get("time_created", 1000),
+                    msg.get("time_updated", 2000),
+                    json.dumps(msg["data"]),
+                ),
+            )
+            for part in msg.get("parts", []):
+                conn.execute(
+                    "INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        part["id"],
+                        msg["id"],
+                        session["id"],
+                        part.get("time_created", 1000),
+                        part.get("time_updated", 2000),
+                        json.dumps(part["data"]),
+                    ),
+                )
+    conn.commit()
+    conn.close()
+
+
+class KiloTranscriptTests(UserRequestTranscriptBuildTests):
+    def test_kilo_direct_lookup_writes_output_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            output_path = tmp_path / "transcript.json"
+            db_path = tmp_path / "kilo.db"
+            _create_kilo_db(db_path, [
+                {
+                    "id": "ses_current",
+                    "directory": str(workdir.resolve()),
+                    "time_created": 1000,
+                    "time_updated": 3000,
+                    "messages": [
+                        {
+                            "id": "msg_001",
+                            "data": {"role": "user"},
+                            "time_created": 1001,
+                            "parts": [
+                                {"id": "prt_001", "data": {"type": "text", "text": "hello from kilo"}, "time_created": 1001},
+                            ],
+                        },
+                        {
+                            "id": "msg_002",
+                            "data": {"role": "assistant"},
+                            "time_created": 1002,
+                            "parts": [
+                                {
+                                    "id": "prt_002",
+                                    "data": {"type": "reasoning", "text": "ignore"},
+                                    "time_created": 1002,
+                                },
+                                {
+                                    "id": "prt_003",
+                                    "data": {"type": "text", "text": "visible kilo reply"},
+                                    "time_created": 1003,
+                                },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "id": "ses_older",
+                    "directory": str(workdir.resolve()),
+                    "time_created": 500,
+                    "time_updated": 2000,
+                    "messages": [
+                        {
+                            "id": "msg_old_001",
+                            "data": {"role": "user"},
+                            "time_created": 501,
+                            "parts": [
+                                {
+                                    "id": "prt_old_001",
+                                    "data": {"type": "text", "text": "older session"},
+                                    "time_created": 501,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ])
+
+            result = self.run_builder(
+                "--cli",
+                "kilo",
+                "--search-root",
+                str(tmp_path),
+                "--output",
+                str(output_path),
+                cwd=workdir,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rendered = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                rendered,
+                [
+                    {"role": "user", "text": "hello from kilo"},
+                    {"role": "assistant", "text": "visible kilo reply"},
+                ],
+            )
+
+    def test_kilo_canary_lookup_works_when_direct_lookup_cannot_resolve_current_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            workdir = tmp_path / "repo"
+            workdir.mkdir()
+            output_path = tmp_path / "transcript.json"
+            db_path = tmp_path / "kilo.db"
+            canary = "trycycle-kilo-canary-123456"
+            _create_kilo_db(db_path, [
+                {
+                    "id": "ses_canary",
+                    "directory": "/somewhere-else",
+                    "time_created": 1000,
+                    "time_updated": 2000,
+                    "messages": [
+                        {
+                            "id": "msg_001",
+                            "data": {"role": "user"},
+                            "time_created": 1001,
+                            "parts": [
+                                {
+                                    "id": "prt_001",
+                                    "data": {"type": "text", "text": f"request with {canary}"},
+                                    "time_created": 1001,
+                                },
+                            ],
+                        },
+                        {
+                            "id": "msg_002",
+                            "data": {"role": "assistant"},
+                            "time_created": 1002,
+                            "parts": [
+                                {
+                                    "id": "prt_002",
+                                    "data": {"type": "text", "text": "kilo canary reply"},
+                                    "time_created": 1002,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ])
+
+            result = self.run_builder(
+                "--cli",
+                "kilo",
+                "--canary",
+                canary,
+                "--search-root",
+                str(tmp_path),
+                "--output",
+                str(output_path),
+                cwd=workdir,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rendered = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                rendered,
+                [
+                    {"role": "user", "text": f"request with {canary}"},
+                    {"role": "assistant", "text": "kilo canary reply"},
+                ],
+            )
+
+
 class OpenCodeTranscriptTests(UserRequestTranscriptBuildTests):
     def test_opencode_canary_finds_correct_session(self):
         with tempfile.TemporaryDirectory() as tmpdir:

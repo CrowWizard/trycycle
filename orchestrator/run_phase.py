@@ -66,17 +66,6 @@ def _missing_transcript_cli_message(unresolved_placeholders: list[str]) -> str:
     )
 
 
-def _missing_kilo_transcript_file_message(unresolved_placeholders: list[str]) -> str:
-    suggestions = [f"{KILO_TRANSCRIPT_FILE_ENV_PREFIX}{name}" for name in unresolved_placeholders]
-    if len(unresolved_placeholders) == 1:
-        suggestions.append(KILO_SINGLE_TRANSCRIPT_FILE_ENV)
-    joined = ", ".join(suggestions)
-    return (
-        "Kilo transcript auto-detection requires transcript file environment bindings. "
-        f"Set one of: {joined}; or pass --transcript-file NAME=PATH explicitly."
-    )
-
-
 def _resolve_kilo_transcript_env_path(placeholder: str) -> str | None:
     value = os.environ.get(f"{KILO_TRANSCRIPT_FILE_ENV_PREFIX}{placeholder}")
     if value is not None and value.strip():
@@ -157,10 +146,9 @@ def _prepare_transcripts(
     if cli_name == "kilo":
         kilo_paths = _resolve_kilo_transcript_paths(unresolved_placeholders)
         rendered_paths.update(kilo_paths)
-        still_unresolved = [name for name in unresolved_placeholders if name not in kilo_paths]
-        if still_unresolved:
-            raise PhaseError(_missing_kilo_transcript_file_message(still_unresolved))
-        return cli_name, rendered_paths
+        unresolved_placeholders = [name for name in unresolved_placeholders if name not in kilo_paths]
+        if not unresolved_placeholders:
+            return cli_name, rendered_paths
 
     if cli_name == "claude-code" and not args.canary:
         raise PhaseError(

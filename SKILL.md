@@ -110,7 +110,7 @@ In `--no-worktree` mode, do not create a nested git worktree and do not create o
 ## Transcript placeholder helper
 
 When a phase wrapper call needs `{USER_REQUEST_TRANSCRIPT}`, `{INITIAL_REQUEST_AND_SUBSEQUENT_CONVERSATION}`, or `{FULL_CONVERSATION_VERBATIM}`:
-1. For Kilo Code, write the current conversation or transcript JSON to a temp UTF-8 file immediately before the wrapper call. Either pass both `--transcript-placeholder NAME` and `--transcript-file NAME=PATH`, or keep `--transcript-cli auto` and export `TRYCYCLE_TRANSCRIPT_FILE_<PLACEHOLDER>=/absolute/path/to/file` first. When there is exactly one transcript placeholder, `TRYCYCLE_TRANSCRIPT_FILE` is also accepted as a shorthand. Do not use transcript database lookup on Kilo.
+1. For Kilo Code, prefer direct session lookup by passing `--transcript-cli auto` or `--transcript-cli kilo` and letting the wrapper read the current transcript from Kilo's local session database. If you already have transcript JSON in hand, you may still override the lookup with `--transcript-file NAME=PATH`, `TRYCYCLE_TRANSCRIPT_FILE_<PLACEHOLDER>=/absolute/path/to/file`, or `TRYCYCLE_TRANSCRIPT_FILE` when there is exactly one transcript placeholder.
 2. For Codex CLI, let the wrapper use direct session lookup by default.
 3. For Kimi CLI, always pass `--transcript-cli kimi-cli` on transcript-bearing wrapper calls and let direct session lookup run first.
 4. If the wrapper reports that a canary is required, run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command, capture stdout exactly as `{CANARY}`, then rerun the wrapper with `--canary "{CANARY}"`. For Kimi-hosted runs, keep `--transcript-cli kimi-cli` on the rerun as well.
@@ -118,7 +118,7 @@ When a phase wrapper call needs `{USER_REQUEST_TRANSCRIPT}`, `{INITIAL_REQUEST_A
 6. For OpenCode, always run `python3 <skill-directory>/orchestrator/user-request-transcript/mark_with_canary.py` as a separate top-level command first, capture stdout exactly as `{CANARY}`, then invoke the wrapper with `--transcript-cli opencode --canary "{CANARY}"`.
 
 The canary must be emitted by a separate top-level command so it reaches the live session transcript before lookup. Do not rely on shell-specific capture or assignment forms that may keep the canary out of visible command output; shells and host wrappers vary, and if the canary is not visibly emitted into the session transcript, lookup will fail. Build transcript placeholder values immediately before each phase wrapper call that uses them.
-Kilo support is explicit here because Kilo should inject the live conversation directly instead of reverse-engineering it from local session storage. Kimi and OpenCode support are explicit here because `host` and `auto` cannot reliably detect a Kimi host, and OpenCode requires canary-based lookup.
+Kilo support is explicit here because Kilo now supports direct session lookup while still allowing explicit transcript overrides. Kimi and OpenCode support are explicit here because `host` and `auto` cannot reliably detect a Kimi host, and OpenCode may still require canary-based lookup when direct resolution is unavailable.
 
 When a step below references `{POST_IMPLEMENTATION_REVIEW_OBSERVATIONS_JSON}`, use the extracted review observations JSON exactly as the placeholder value.
 

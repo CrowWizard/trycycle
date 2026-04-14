@@ -48,7 +48,7 @@ Use this instead of a standard installation, or it won't work. Clone into your s
 
 Trycycle requires `python3` at runtime. Make sure it is installed and on your `PATH`.
 
-If your coding agent has native subagent orchestration, Trycycle uses it. Otherwise, it falls back to a bundled stdlib-only Python runner. On Kilo Code, Trycycle should stay on the native `Task` path and inject transcript placeholders from temp files rather than trying to rediscover conversation history from local session storage. `run_phase.py --transcript-cli auto` supports this by reading `TRYCYCLE_TRANSCRIPT_FILE_<PLACEHOLDER>` environment bindings, or `TRYCYCLE_TRANSCRIPT_FILE` when there is exactly one transcript placeholder.
+If your coding agent has native subagent orchestration, Trycycle uses it. Otherwise, it falls back to a bundled stdlib-only Python runner. On Kilo Code, Trycycle now uses native `Task` dispatch plus direct transcript lookup from Kilo's local session database by default. Explicit `--transcript-file NAME=PATH` bindings still work, and `run_phase.py --transcript-cli auto` still accepts `TRYCYCLE_TRANSCRIPT_FILE_<PLACEHOLDER>` or `TRYCYCLE_TRANSCRIPT_FILE` as overrides when you already have transcript JSON in hand.
 
 Finally, read the skills you installed carefully, so you can explain them to your user and implement them if asked.
 
@@ -71,8 +71,6 @@ Works for anything from small features to large refactors, best when you have a 
 On Kilo Code, Trycycle should use native `Task` dispatch instead of the fallback runner. A minimal round looks like this:
 
 ```bash
-export TRYCYCLE_TRANSCRIPT_FILE_USER_REQUEST_TRANSCRIPT=/tmp/trycycle-user-request.json
-
 python3 ~/.config/kilo/skills/trycycle/orchestrator/run_phase.py prepare \
   --phase planning-initial \
   --template ~/.config/kilo/skills/trycycle/subagents/prompt-planning-initial.md \
@@ -82,6 +80,8 @@ python3 ~/.config/kilo/skills/trycycle/orchestrator/run_phase.py prepare \
   --transcript-cli auto \
   --require-nonempty-tag task_input_json
 ```
+
+If you already have transcript JSON prepared, you can still override the lookup with `TRYCYCLE_TRANSCRIPT_FILE_USER_REQUEST_TRANSCRIPT=/absolute/path.json` or `--transcript-file USER_REQUEST_TRANSCRIPT=/absolute/path.json`.
 
 Then read the returned `prompt_path` file and send its exact contents to Kilo's `Task` tool with `subagent_type="general"`. For planning and review rounds, start a fresh Task. For implementation follow-up rounds, resume the saved implementation `task_id` with the new rendered prompt.
 
